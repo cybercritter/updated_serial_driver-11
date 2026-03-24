@@ -24,7 +24,7 @@
   "sonarlint.pathToCompileCommands": "${workspaceFolder}/build-coverage/compile_commands.json",
   "sonarlint.connectedMode.project": {
     "connectionId": "cybercritter",
-    "projectKey": "cybercritter_fifotest"
+    "projectKey": "cybercritter_updated_serial_driver-11"
   },
   "cSpell.words": [
     "abaco",

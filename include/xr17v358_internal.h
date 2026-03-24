@@ -17,6 +17,7 @@
 
 #include "ring_buffer.h"
 #include "xr17v358.h"
+#include "xr17v358_register_map.h"
 
 /** Offset of the memory-mapped FIFO window from each port base. */
 #define XR17V358_FIFO_REGISTER_OFFSET 0x0100U
@@ -30,15 +31,15 @@
 /** Static port-offset table shared across the implementation. */
 extern const uint32_t k_port_offsets[];
 /** Modeled TX FIFO state for each port. */
-extern xr17v358_ring_buffer tx_fifo[8];
+extern xr17v358_ring_buffer tx_fifo[XR17V358_PORT_COUNT];
 /** Modeled RX FIFO state for each port. */
-extern xr17v358_ring_buffer rx_fifo[8];
+extern xr17v358_ring_buffer rx_fifo[XR17V358_PORT_COUNT];
 /** Buffered TX messages waiting to be moved into the TX FIFO. */
-extern xr17v358_ring_buffer tx_queue[8];
+extern xr17v358_ring_buffer tx_queue[XR17V358_PORT_COUNT];
 /** Decoded RX payload bytes waiting to be returned to callers. */
-extern xr17v358_ring_buffer rx_queue[8];
+extern xr17v358_ring_buffer rx_queue[XR17V358_PORT_COUNT];
 /** Current UART configuration for each port. */
-extern xr17v358_port_config port_config[8];
+extern xr17v358_port_config port_config[XR17V358_PORT_COUNT];
 /** Non-zero once shared state has been initialized. */
 extern bool is_initialized;
 
@@ -86,7 +87,8 @@ xr17v358_port_config xr17v358_default_port_config(void);
 void xr17v358_ensure_state_initialized(void);
 
 /**
- * @brief Inject raw encoded message bytes into one of the helper-managed buffers.
+ * @brief Inject raw encoded message bytes into one of the helper-managed
+ * buffers.
  * @param buffers Target buffer array indexed by port.
  * @param port_index Zero-based UART port number.
  * @param data Encoded bytes to inject.

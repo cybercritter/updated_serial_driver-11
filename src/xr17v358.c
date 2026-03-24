@@ -183,7 +183,6 @@ xr17v358_error xr17v358_decode_serial_data(size_t port_index,
                                            size_t data_capacity,
                                            size_t *data_length) {
   size_t decoded_length = 0U;
-  size_t i = 0U;
 
   (void)port_index;
 
@@ -198,7 +197,7 @@ xr17v358_error xr17v358_decode_serial_data(size_t port_index,
   }
 
   /* Decode the frame into data */
-  for (i = 1U; i + 1U < frame_length; ++i) {
+  for (size_t i = 1U; i + 1U < frame_length; ++i) {
     uint8_t value = frame[i];
 
     if (value == XR17V358_FRAME_DELIMITER) {
