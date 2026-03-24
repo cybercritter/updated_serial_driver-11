@@ -1,0 +1,43 @@
+{
+  "editor.tokenColorCustomizations": {
+    "textMateRules": [
+      {
+        "scope": "googletest.failed",
+        "settings": {
+          "foreground": "#f00"
+        }
+      },
+      {
+        "scope": "googletest.passed",
+        "settings": {
+          "foreground": "#0f0"
+        }
+      },
+      {
+        "scope": "googletest.run",
+        "settings": {
+          "foreground": "#0f0"
+        }
+      }
+    ]
+  },
+  "sonarlint.pathToCompileCommands": "${workspaceFolder}/build-coverage/compile_commands.json",
+  "sonarlint.connectedMode.project": {
+    "connectionId": "cybercritter",
+    "projectKey": "cybercritter_fifotest"
+  },
+  "cSpell.words": [
+    "abaco",
+    "CTEST",
+    "DBUILD",
+    "DCMAKE",
+    "DENABLE",
+    "DFETCHCONTENT",
+    "EFCR",
+    "fifoupdates",
+    "GCOVR",
+    "IOINTENA",
+    "MMIO",
+    "RXLVL"
+  ]
+}

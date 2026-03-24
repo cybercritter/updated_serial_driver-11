@@ -1,0 +1,39 @@
+# CMake build trees
+**/build*/**
+/cmake-build-*/
+
+# In-source CMake generated files
+/CMakeCache.txt
+/CMakeFiles/
+/CTestTestfile.cmake
+/cmake_install.cmake
+/install_manifest.txt
+/compile_commands.json
+/Testing/
+/DartConfiguration.tcl
+
+# In-source Ninja and Make files
+/build.ninja
+/.ninja_deps
+/.ninja_log
+/Makefile
+
+# C/C++ build products
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# Debug and coverage artifacts
+*.dSYM/
+*.pdb
+*.ilk
+*.gcda
+*.gcno
+*.gcov
+**/.cache/**

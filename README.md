@@ -1,0 +1,117 @@
+# fifoupdates
+
+`fifoupdates` is a small C/C++ project that models an XR17V358 multi-port UART
+driver, a helper layer for demo and test workflows, and a set of shared
+internal ring-buffer primitives used by the driver model.
+
+## Components
+
+### Production driver
+
+The production API lives in
+[`include/xr17v358.h`](include/xr17v358.h) and is implemented by
+[`src/xr17v358.c`](src/xr17v358.c).
+
+It provides:
+
+- port configuration
+- frame encode/decode helpers
+- UART and FIFO address calculation
+- buffered transmit and receive data movement
+- TX FIFO MMIO writes
+- port polling with RX readiness reporting
+
+Current TX/RX flow:
+
+- `xr17v358_write()` encodes each outbound payload packet into one frame and
+  buffers it in an internal TX ring
+- `xr17v358_poll_port()` stages buffered TX frames into the
+  modeled TX FIFO
+- `xr17v358_read()` decodes complete packet frames from the modeled RX FIFO into an
+  internal decoded read ring before returning payload bytes
+
+The CMake target for this API is `xr17v358`.
+
+### Helper API
+
+Non-production behavior lives in [`include/helpers.h`](include/helpers.h)
+and is implemented by [`src/xr17v358_helpers.c`](src/xr17v358_helpers.c) plus
+[`src/demo.c`](src/demo.c).
+
+This layer contains:
+
+- driver state reset
+- RX/TX injection helpers used by tests
+- outbound TX FIFO inspection helpers
+- demo entry points and UART base printing
+
+The CMake target for this API is `xr17v358_helpers`.
+
+### Ring-buffer module
+
+Shared ring-buffer primitives live in
+[`include/ring_buffer.h`](include/ring_buffer.h) and
+[`src/ring_buffer.c`](src/ring_buffer.c).
+
+This module is used internally by the driver and helper layer. It is not meant
+to be treated as the stable application-facing API.
+
+### Hardware abstraction draft
+
+The application-facing abstraction lives in [`hw_abstraction.h`](hw_abstraction.h)
+and [`src/hw_abstraction.c`](src/hw_abstraction.c).
+
+These files currently describe a planned higher-level wrapper, but they are not
+part of the active CMake build and `src/hw_abstraction.c` still needs updates
+to match the current XR17V358 type names and helpers.
+
+## Build
+
+Configure and build with CMake:
+
+```sh
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build
+```
+
+If you do not want tests, omit `-DBUILD_TESTING=ON`.
+
+## Run
+
+The demo executable prints calculated UART base addresses:
+
+```sh
+./build/xr17v358_demo
+./build/xr17v358_demo 0x20000000
+```
+
+## Test
+
+Run the test suite with:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+## Coverage
+
+The project includes an optional coverage workflow:
+
+```sh
+cmake -S . -B build -DENABLE_COVERAGE=ON -DBUILD_TESTING=ON
+cmake --build build --target coverage
+```
+
+The coverage workflow requires `gcovr` to be available on `PATH`. The
+top-level `coverage` target configures and builds a separate
+`build-coverage/` tree before generating the report artifacts there.
+
+## Notes
+
+- RX readiness reported by `xr17v358_poll_port()` means a complete RX message
+  is already available in the RX FIFO or decoded read ring; polling does not
+  itself consume RX data.
+- The helper names `xr17v358_queue_size()`, `xr17v358_inject_queue_frame_bytes()`,
+  and `xr17v358_queue_read()` retain older queue terminology for compatibility,
+  but they now inspect the modeled outbound TX FIFO path.
+- `third_party/googletest` is vendored for local test builds.
