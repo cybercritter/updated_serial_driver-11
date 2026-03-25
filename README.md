@@ -27,8 +27,9 @@ Modeled TX/RX flow:
 
 - `xr17v358_write()` encodes each outbound payload packet into one frame and
   buffers it in an internal TX ring
-- `xr17v358_poll_port()` stages buffered TX frames into the
-  modeled TX FIFO
+- `xr17v358_poll_port()` moves up to one FIFO's worth of TX bytes into the
+  modeled TX FIFO and up to one FIFO's worth of pending RX bytes into the
+  modeled RX FIFO, preserving partial frame state across polls
 - `xr17v358_read()` decodes complete packet frames from the modeled RX FIFO into an
   internal decoded read ring before returning payload bytes
 
@@ -109,9 +110,9 @@ top-level `coverage` target configures and builds a separate
 
 ## Notes
 
-- RX readiness reported by `xr17v358_poll_port()` means a complete RX message
-  is already available in the RX FIFO or decoded read ring; polling does not
-  itself consume RX data.
+- RX readiness reported by `xr17v358_poll_port()` means a complete RX frame
+  ending with the trailing `0x7E` delimiter is already buffered in the RX FIFO;
+  polling does not itself consume RX data.
 - The helper names `xr17v358_queue_size()`, `xr17v358_inject_queue_frame_bytes()`,
   and `xr17v358_queue_read()` retain older queue terminology for compatibility,
   but they now inspect the modeled outbound TX FIFO path.

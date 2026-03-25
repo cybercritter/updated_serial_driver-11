@@ -64,6 +64,26 @@ size_t xr17v358_ring_frame_count(const xr17v358_ring_buffer *rb) {
   return frames;
 }
 
+int xr17v358_ring_has_complete_frame(const xr17v358_ring_buffer *rb) {
+  size_t i = 0U;
+  int saw_start = 0;
+
+  while (i < rb->size) {
+    const uint8_t value = rb->storage[(rb->head + i) % rb->capacity];
+
+    if (value == XR17V358_FRAME_DELIMITER) {
+      if (saw_start) {
+        return 1;
+      }
+      saw_start = 1;
+    }
+
+    i++;
+  }
+
+  return 0;
+}
+
 xr17v358_error xr17v358_ring_read_frame(xr17v358_ring_buffer *rb,
                                         uint8_t *frame, size_t frame_capacity,
                                         size_t *frame_length) {

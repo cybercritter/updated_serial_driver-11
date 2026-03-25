@@ -11,6 +11,7 @@ void xr17v358_reset(void) {
   for (size_t i = 0; i < xr17v358_get_port_count(); ++i) {
     memset(tx_fifo[i].storage, 0, sizeof(tx_fifo[i].storage));
     memset(rx_fifo[i].storage, 0, sizeof(rx_fifo[i].storage));
+    memset(rx_pending[i].storage, 0, sizeof(rx_pending[i].storage));
     memset(tx_queue[i].storage, 0, sizeof(tx_queue[i].storage));
     memset(rx_queue[i].storage, 0, sizeof(rx_queue[i].storage));
   }
@@ -63,14 +64,13 @@ xr17v358_error xr17v358_receive(size_t port_index, const uint8_t *data,
   frame_length = xr17v358_encode_serial_data(port_index, data, length, frame,
                                              sizeof(frame));
   if (frame_length == 0U ||
-      xr17v358_ring_frame_count(&rx_fifo[port_index]) >=
-          XR17V358_FIFO_CAPACITY ||
-      rx_fifo[port_index].size + frame_length > rx_fifo[port_index].capacity) {
+      rx_pending[port_index].size + frame_length >
+          rx_pending[port_index].capacity) {
     return XR17V358_OK;
   }
 
   written =
-      xr17v358_ring_write_bytes(&rx_fifo[port_index], frame, frame_length);
+      xr17v358_ring_write_bytes(&rx_pending[port_index], frame, frame_length);
   /* GCOVR_EXCL_START */
   if (written != frame_length) {
     return XR17V358_ERROR_INVALID_FRAME;
@@ -147,8 +147,8 @@ xr17v358_error xr17v358_queue_read(size_t port_index, uint8_t *data,
   }
 
   while (count < length && tx_fifo[port_index].size > 0U) {
-    if (xr17v358_ring_frame_count(&tx_fifo[port_index]) == 0U) {
-      return XR17V358_ERROR_INVALID_FRAME;
+    if (!xr17v358_ring_has_complete_frame(&tx_fifo[port_index])) {
+      break;
     }
 
     error = xr17v358_ring_read_frame(&tx_fifo[port_index], frame, sizeof(frame),

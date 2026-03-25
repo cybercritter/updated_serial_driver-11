@@ -18,7 +18,7 @@
 
 /** Maximum number of payload bytes tracked in each software queue model. */
 #define XR17V358_QUEUE_CAPACITY 1024U
-/** Maximum number of complete messages tracked in each FIFO model. */
+/** Maximum number of bytes transferred per modeled FIFO service step. */
 #define XR17V358_FIFO_CAPACITY 256U
 /** HDLC-style message delimiter used by the packet model. */
 #define XR17V358_FRAME_DELIMITER 0x7EU
@@ -77,6 +77,14 @@ size_t xr17v358_ring_read_bytes(xr17v358_ring_buffer *rb, uint8_t *data,
  * @return Number of complete encoded messages currently buffered.
  */
 size_t xr17v358_ring_frame_count(const xr17v358_ring_buffer *rb);
+
+/**
+ * @brief Check whether a ring buffer contains a delimited frame terminator.
+ * @param rb Source ring buffer.
+ * @return Non-zero when bytes from one delimiter through a later delimiter are
+ * buffered, otherwise zero.
+ */
+int xr17v358_ring_has_complete_frame(const xr17v358_ring_buffer *rb);
 
 /**
  * @brief Remove one complete encoded message from a ring buffer.

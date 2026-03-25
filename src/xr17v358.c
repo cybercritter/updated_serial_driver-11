@@ -11,6 +11,7 @@ const uint32_t k_port_offsets[] = {
 };
 xr17v358_ring_buffer tx_fifo[8];
 xr17v358_ring_buffer rx_fifo[8];
+xr17v358_ring_buffer rx_pending[8];
 xr17v358_ring_buffer tx_queue[8];
 xr17v358_ring_buffer rx_queue[8];
 xr17v358_port_config port_config[8];
@@ -40,6 +41,51 @@ static size_t xr17v358_read_fifo_level(volatile void *device_base,
   return level;
 }
 
+static xr17v358_error xr17v358_transfer_ring_bytes(
+    xr17v358_ring_buffer *source, xr17v358_ring_buffer *destination,
+    size_t max_bytes) {
+  uint8_t bytes[XR17V358_FIFO_CAPACITY];
+  size_t bytes_to_move = source->size;
+  size_t bytes_moved = 0U;
+
+  if (bytes_to_move > max_bytes) {
+    bytes_to_move = max_bytes;
+  }
+
+  if (bytes_to_move > destination->capacity - destination->size) {
+    bytes_to_move = destination->capacity - destination->size;
+  }
+
+  if (bytes_to_move == 0U) {
+    return XR17V358_OK;
+  }
+
+  bytes_moved = xr17v358_ring_read_bytes(source, bytes, bytes_to_move);
+  if (bytes_moved != bytes_to_move) {
+    return XR17V358_ERROR_INVALID_FRAME;
+  }
+
+  if (xr17v358_ring_write_bytes(destination, bytes, bytes_to_move) !=
+      bytes_to_move) {
+    return XR17V358_ERROR_INVALID_FRAME;
+  }
+
+  return XR17V358_OK;
+}
+
+static xr17v358_error xr17v358_stage_rx_bytes_from_pending(size_t port_index) {
+  return xr17v358_transfer_ring_bytes(&rx_pending[port_index],
+                                      &rx_fifo[port_index],
+                                      XR17V358_FIFO_CAPACITY);
+}
+
+static xr17v358_error xr17v358_flush_tx_queue_to_modeled_fifo(
+    size_t port_index) {
+  return xr17v358_transfer_ring_bytes(&tx_queue[port_index],
+                                      &tx_fifo[port_index],
+                                      XR17V358_FIFO_CAPACITY);
+}
+
 static xr17v358_error xr17v358_decode_rx_fifo_into_read_queue(
     size_t port_index) {
   uint8_t frame[XR17V358_MAX_ENCODED_BYTE_COUNT];
@@ -48,7 +94,7 @@ static xr17v358_error xr17v358_decode_rx_fifo_into_read_queue(
   size_t frame_length = 0U;
   xr17v358_error error;
 
-  while (xr17v358_ring_frame_count(&rx_fifo[port_index]) > 0U &&
+  while (xr17v358_ring_has_complete_frame(&rx_fifo[port_index]) &&
          rx_queue[port_index].size < rx_queue[port_index].capacity) {
     error = xr17v358_ring_read_frame(&rx_fifo[port_index], frame, sizeof(frame),
                                      &frame_length);
@@ -73,8 +119,7 @@ static xr17v358_error xr17v358_decode_rx_fifo_into_read_queue(
 }
 
 static xr17v358_error xr17v358_read_from_staged_rx(size_t port_index,
-                                                   uint8_t *data,
-                                                   size_t length,
+                                                   uint8_t *data, size_t length,
                                                    size_t *bytes_read) {
   xr17v358_error error = xr17v358_decode_rx_fifo_into_read_queue(port_index);
 
@@ -90,8 +135,8 @@ static xr17v358_error xr17v358_read_from_staged_rx(size_t port_index,
   return XR17V358_OK;
 }
 
-static xr17v358_error xr17v358_stage_rx_bytes_from_hw(volatile void *device_base,
-                                                      size_t port_index) {
+static xr17v358_error xr17v358_stage_rx_bytes_from_hw(
+    volatile void *device_base, size_t port_index) {
   uint8_t frame_bytes[XR17V358_FIFO_CAPACITY];
   size_t bytes_available = 0U;
   size_t bytes_to_stage = 0U;
@@ -224,6 +269,7 @@ void xr17v358_reset_state(void) {
         &tx_fifo[i], XR17V358_FIFO_CAPACITY * XR17V358_MAX_ENCODED_BYTE_COUNT);
     xr17v358_ring_reset(
         &rx_fifo[i], XR17V358_FIFO_CAPACITY * XR17V358_MAX_ENCODED_BYTE_COUNT);
+    xr17v358_ring_reset(&rx_pending[i], XR17V358_RING_BUFFER_STORAGE_CAPACITY);
     xr17v358_ring_reset(&tx_queue[i], XR17V358_RING_BUFFER_STORAGE_CAPACITY);
     xr17v358_ring_reset(&rx_queue[i], XR17V358_RING_BUFFER_STORAGE_CAPACITY);
     port_config[i] = xr17v358_default_port_config();
@@ -270,6 +316,8 @@ xr17v358_error xr17v358_initialize_port(size_t port_index,
   }
 
   port_config[port_index] = *config;
+
+  /** TODO: Add the hardware initialization code */
   return XR17V358_OK;
 }
 
@@ -588,31 +636,17 @@ xr17v358_error xr17v358_poll_port(size_t port_index) {
     return error;
   }
 
-  /* Polling advances buffered TX frames into the modeled TX FIFO. */
-  if (xr17v358_ring_frame_count(&tx_queue[port_index]) > 0U) {
-    uint8_t frame[XR17V358_MAX_ENCODED_BYTE_COUNT];
-    size_t frame_length = 0U;
-
-    while (xr17v358_ring_frame_count(&tx_queue[port_index]) > 0U &&
-           xr17v358_ring_can_accept_frame(&tx_fifo[port_index],
-                                          XR17V358_FIFO_CAPACITY)) {
-      error = xr17v358_ring_read_frame(&tx_queue[port_index], frame,
-                                       sizeof(frame), &frame_length);
-      if (error != XR17V358_OK) {
-        return error;
-      }
-
-      /* GCOVR_EXCL_START */
-      if (xr17v358_ring_write_bytes(&tx_fifo[port_index], frame,
-                                    frame_length) != frame_length) {
-        return XR17V358_ERROR_INVALID_FRAME;
-      }
-      /* GCOVR_EXCL_STOP */
-    }
+  error = xr17v358_flush_tx_queue_to_modeled_fifo(port_index);
+  if (error != XR17V358_OK) {
+    return error;
   }
 
-  if (rx_queue[port_index].size > 0U ||
-      xr17v358_ring_frame_count(&rx_fifo[port_index]) > 0U) {
+  error = xr17v358_stage_rx_bytes_from_pending(port_index);
+  if (error != XR17V358_OK) {
+    return error;
+  }
+
+  if (xr17v358_ring_has_complete_frame(&rx_fifo[port_index])) {
     return XR17V358_MESSAGE_READY;
   }
 
@@ -713,8 +747,7 @@ xr17v358_error xr17v358_poll_hw_port(volatile void *device_base,
     return error;
   }
 
-  if (rx_queue[port_index].size > 0U ||
-      xr17v358_ring_frame_count(&rx_fifo[port_index]) > 0U) {
+  if (xr17v358_ring_has_complete_frame(&rx_fifo[port_index])) {
     return XR17V358_MESSAGE_READY;
   }
 

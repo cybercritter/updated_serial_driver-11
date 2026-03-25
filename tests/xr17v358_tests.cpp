@@ -321,8 +321,8 @@ TEST(Xr17v358, QueueReadRejectsMalformedInjectedFrames) {
   ASSERT_EQ(xr17v358_inject_queue_frame_bytes(0, incomplete.data(),
                                               incomplete.size(), &count),
             XR17V358_OK);
-  EXPECT_EQ(xr17v358_queue_read(0, &output, 1, &count),
-            XR17V358_ERROR_INVALID_FRAME);
+  EXPECT_EQ(xr17v358_queue_read(0, &output, 1, &count), XR17V358_OK);
+  EXPECT_EQ(count, 0U);
 
   xr17v358_reset();
   ASSERT_EQ(xr17v358_inject_queue_frame_bytes(0, empty_frame.data(),
@@ -357,6 +357,8 @@ TEST(Xr17v358, FifoWriteReadPreservesOrder) {
   ASSERT_EQ(xr17v358_receive(2, kInput.data(), kInput.size(), &received),
             XR17V358_OK);
   ASSERT_EQ(received, kInput.size());
+  ASSERT_EQ(xr17v358_fifo_level(2), 0U);
+  ASSERT_EQ(xr17v358_poll_port(2), XR17V358_MESSAGE_READY);
   ASSERT_EQ(xr17v358_fifo_level(2), 1U);
 
   ASSERT_EQ(xr17v358_read(2, output.data(), output.size(), &read_count),
@@ -384,6 +386,8 @@ TEST(Xr17v358, ReadPathIsIndependentFromWritePath) {
   ASSERT_EQ(xr17v358_receive(0, kRxData.data(), kRxData.size(), &received),
             XR17V358_OK);
   ASSERT_EQ(received, kRxData.size());
+  EXPECT_EQ(xr17v358_fifo_level(0), 0U);
+  ASSERT_EQ(xr17v358_poll_port(0), XR17V358_MESSAGE_READY);
   EXPECT_EQ(xr17v358_fifo_level(0), 1U);
 
   ASSERT_EQ(xr17v358_read(0, output.data(), output.size(), &read_count),
@@ -405,7 +409,7 @@ TEST(Xr17v358, ReadStagesRxFifoDataIntoReadBuffer) {
   ASSERT_EQ(xr17v358_receive(3, kRxData.data(), kRxData.size(), &received),
             XR17V358_OK);
   ASSERT_EQ(received, kRxData.size());
-  ASSERT_EQ(xr17v358_fifo_level(3), 1U);
+  ASSERT_EQ(xr17v358_fifo_level(3), 0U);
 
   ASSERT_EQ(xr17v358_poll_port(3), XR17V358_MESSAGE_READY);
   EXPECT_EQ(xr17v358_fifo_level(3), 1U);
@@ -431,6 +435,8 @@ TEST(Xr17v358, PollerMovesPendingWritesIntoTxFifoUntilItFills) {
   const size_t fifo_capacity = xr17v358_get_fifo_capacity();
   std::vector<uint8_t> tx =
       test_helpers::make_incrementing_bytes(fifo_capacity + 20U);
+  std::vector<uint8_t> drained;
+  size_t polls = 0U;
 
   for (size_t i = 0; i < tx.size(); ++i) {
     size_t tx_written = 0U;
@@ -439,33 +445,20 @@ TEST(Xr17v358, PollerMovesPendingWritesIntoTxFifoUntilItFills) {
     EXPECT_EQ(tx_written, 1U);
   }
 
-  ASSERT_EQ(xr17v358_poll_port(1), XR17V358_MESSAGE_NOT_READY);
-  EXPECT_EQ(xr17v358_fifo_level(1), 0U);
-  EXPECT_EQ(xr17v358_queue_size(1), fifo_capacity);
+  while (drained.size() < tx.size()) {
+    std::vector<uint8_t> batch(fifo_capacity);
+    size_t popped = 0U;
 
-  std::vector<uint8_t> drained(fifo_capacity);
-  size_t popped = 0;
-  ASSERT_EQ(xr17v358_queue_read(1, drained.data(), drained.size(), &popped),
-            XR17V358_OK);
-  ASSERT_EQ(popped, fifo_capacity);
-
-  for (size_t i = 0; i < fifo_capacity; ++i) {
-    EXPECT_EQ(drained[i], tx[i]);
+    ASSERT_EQ(xr17v358_poll_port(1), XR17V358_MESSAGE_NOT_READY);
+    ASSERT_EQ(xr17v358_queue_read(1, batch.data(), batch.size(), &popped),
+              XR17V358_OK);
+    drained.insert(drained.end(), batch.begin(), batch.begin() + popped);
+    polls++;
   }
 
-  ASSERT_EQ(xr17v358_poll_port(1), XR17V358_MESSAGE_NOT_READY);
-  EXPECT_EQ(xr17v358_queue_size(1), 20U);
-
-  std::vector<uint8_t> remaining(20U);
-  size_t remaining_count = 0U;
-  ASSERT_EQ(xr17v358_queue_read(1, remaining.data(), remaining.size(),
-                                &remaining_count),
-            XR17V358_OK);
-  ASSERT_EQ(remaining_count, remaining.size());
-
-  for (size_t i = 0; i < remaining.size(); ++i) {
-    EXPECT_EQ(remaining[i], tx[fifo_capacity + i]);
-  }
+  EXPECT_GT(polls, 1U);
+  EXPECT_EQ(drained, tx);
+  EXPECT_EQ(xr17v358_queue_size(1), 0U);
 }
 
 TEST(Xr17v358, PollerStagesEachWriteCallAsOneFrame) {
@@ -672,6 +665,107 @@ TEST(Xr17v358, HardwarePollReportsPartialRxFrameAsNotReady) {
   EXPECT_EQ(xr17v358_poll_hw_port(mmio.data(), 4), XR17V358_MESSAGE_NOT_READY);
   EXPECT_EQ(rx_fifo[4].size, kPartialFrame.size());
   EXPECT_EQ(xr17v358_ring_frame_count(&rx_fifo[4]), 0U);
+}
+
+TEST(Xr17v358, HardwareTransmitMoves1000BytesAcrossMultipleFifoFlushes) {
+  xr17v358_reset();
+
+  std::array<uint8_t, 0x2000> mmio{};
+  const std::vector<uint8_t> payload =
+      test_helpers::make_incrementing_bytes(1000U);
+  const size_t hw_fifo_window = std::numeric_limits<uint8_t>::max();
+  std::vector<uint8_t> encoded(XR17V358_MAX_ENCODED_BYTE_COUNT);
+  std::vector<uint8_t> transmitted;
+  std::vector<uint8_t> decoded(payload.size());
+  size_t decoded_length = 0U;
+  size_t written = 0U;
+  const size_t frame_length =
+      xr17v358_encode_serial_data(5, payload.data(), payload.size(),
+                                  encoded.data(), encoded.size());
+  const size_t txlvl_offset = mmio_offset(5, XR17V358_REG_TXLVL);
+  const size_t fifo_offset = mmio_offset(5, XR17V358_REG_FIFO);
+
+  ASSERT_GT(frame_length, 0U);
+  encoded.resize(frame_length);
+  transmitted.reserve(frame_length);
+
+  mmio[txlvl_offset] = static_cast<uint8_t>(hw_fifo_window);
+  ASSERT_EQ(xr17v358_write_hw(mmio.data(), 5, payload.data(), payload.size(),
+                              &written),
+            XR17V358_OK);
+  ASSERT_EQ(written, payload.size());
+
+  transmitted.insert(transmitted.end(), mmio.begin() + fifo_offset,
+                     mmio.begin() + fifo_offset + (frame_length - tx_queue[5].size));
+
+  while (tx_queue[5].size > 0U) {
+    const size_t queued_before = tx_queue[5].size;
+    mmio[txlvl_offset] = static_cast<uint8_t>(hw_fifo_window);
+    const xr17v358_error poll_result =
+        xr17v358_poll_hw_port(mmio.data(), 5);
+    const size_t flushed = queued_before - tx_queue[5].size;
+
+    ASSERT_EQ(poll_result, XR17V358_MESSAGE_NOT_READY);
+    ASSERT_GT(flushed, 0U);
+    transmitted.insert(transmitted.end(), mmio.begin() + fifo_offset,
+                       mmio.begin() + fifo_offset + flushed);
+  }
+
+  ASSERT_EQ(transmitted, encoded);
+  ASSERT_EQ(xr17v358_decode_serial_data(5, transmitted.data(),
+                                        transmitted.size(), decoded.data(),
+                                        decoded.size(), &decoded_length),
+            XR17V358_OK);
+  EXPECT_EQ(decoded_length, payload.size());
+  EXPECT_EQ(decoded, payload);
+}
+
+TEST(Xr17v358, HardwareReceiveMoves1000BytesAcrossMultipleFifoPolls) {
+  xr17v358_reset();
+
+  std::array<uint8_t, 0x2000> mmio{};
+  const std::vector<uint8_t> payload =
+      test_helpers::make_incrementing_bytes(1000U);
+  const size_t hw_fifo_window = std::numeric_limits<uint8_t>::max();
+  std::vector<uint8_t> encoded(XR17V358_MAX_ENCODED_BYTE_COUNT);
+  std::vector<uint8_t> output(payload.size());
+  size_t read_count = 0U;
+  size_t offset = 0U;
+  size_t poll_count = 0U;
+  const size_t frame_length =
+      xr17v358_encode_serial_data(6, payload.data(), payload.size(),
+                                  encoded.data(), encoded.size());
+  const size_t fifo_offset = mmio_offset(6, XR17V358_REG_FIFO);
+  const size_t rxlvl_offset = mmio_offset(6, XR17V358_REG_RXLVL);
+
+  ASSERT_GT(frame_length, 0U);
+  encoded.resize(frame_length);
+
+  while (offset < encoded.size()) {
+    const size_t chunk_length =
+        std::min(hw_fifo_window, encoded.size() - offset);
+    const xr17v358_error expected_result =
+        (offset + chunk_length < encoded.size()) ? XR17V358_MESSAGE_NOT_READY
+                                                 : XR17V358_MESSAGE_READY;
+
+    mmio[rxlvl_offset] = static_cast<uint8_t>(chunk_length);
+    for (size_t i = 0U; i < chunk_length; ++i) {
+      mmio[fifo_offset + i] = encoded[offset + i];
+    }
+
+    ASSERT_EQ(xr17v358_poll_hw_port(mmio.data(), 6), expected_result);
+    offset += chunk_length;
+    ++poll_count;
+  }
+
+  mmio[rxlvl_offset] = 0U;
+  ASSERT_EQ(xr17v358_read_hw(mmio.data(), 6, output.data(), output.size(),
+                             &read_count),
+            XR17V358_OK);
+  EXPECT_EQ(read_count, payload.size());
+  EXPECT_EQ(output, payload);
+  EXPECT_EQ(rx_fifo[6].size, 0U);
+  EXPECT_GT(poll_count, 1U);
 }
 
 TEST(Xr17v358, PollerAndApisRejectInvalidArguments) {
@@ -902,7 +996,7 @@ TEST(Xr17v358, ReceiveHandlesZeroLengthOversizeAndCapacityLimits) {
                                       existing_frame.size()),
             existing_frame.size());
   EXPECT_EQ(xr17v358_receive(0, &byte, 1U, &received), XR17V358_OK);
-  EXPECT_EQ(received, 0U);
+  EXPECT_EQ(received, 1U);
 }
 
 TEST(Xr17v358, TransferNextTxFrameCoversAllReachableOutcomes) {
@@ -979,7 +1073,9 @@ TEST(Xr17v358, QueueReadReadAndPollPropagateOversizedFrameErrors) {
   ASSERT_EQ(xr17v358_ring_write_bytes(&tx_queue[0], oversized_frame.data(),
                                       oversized_frame.size()),
             oversized_frame.size());
-  EXPECT_EQ(xr17v358_poll_port(0), XR17V358_ERROR_INVALID_FRAME);
+  EXPECT_EQ(xr17v358_poll_port(0), XR17V358_MESSAGE_NOT_READY);
+  EXPECT_EQ(xr17v358_queue_read(0, &byte, 1U, &count), XR17V358_OK);
+  EXPECT_EQ(count, 0U);
 }
 
 TEST(Xr17v358, WriteAndReadGuardAgainstShortWritesWithCorruptedState) {
@@ -1071,7 +1167,7 @@ TEST(Xr17v358, DecodeAndTxFifoWriteCoverRemainingValidationCases) {
             XR17V358_ERROR_INVALID_ARGUMENT);
 }
 
-TEST(Xr17v358, PollPortReportsReadyWhenDecodedReadQueueStillHasBytes) {
+TEST(Xr17v358, PollPortRequiresCompleteFrameStillBufferedInRxFifo) {
   xr17v358_reset();
 
   constexpr std::array<uint8_t, 4> kRxData = {0x61U, 0x62U, 0x63U, 0x64U};
@@ -1081,11 +1177,12 @@ TEST(Xr17v358, PollPortReportsReadyWhenDecodedReadQueueStillHasBytes) {
 
   ASSERT_EQ(xr17v358_receive(0, kRxData.data(), kRxData.size(), &received),
             XR17V358_OK);
+  ASSERT_EQ(xr17v358_poll_port(0), XR17V358_MESSAGE_READY);
   ASSERT_EQ(xr17v358_read(0, first_half.data(), first_half.size(), &read_count),
             XR17V358_OK);
   ASSERT_EQ(read_count, first_half.size());
   EXPECT_EQ(xr17v358_fifo_level(0), 0U);
-  EXPECT_EQ(xr17v358_poll_port(0), XR17V358_MESSAGE_READY);
+  EXPECT_EQ(xr17v358_poll_port(0), XR17V358_MESSAGE_NOT_READY);
 }
 
 TEST(Xr17v358, BranchCoverageExercisesAdditionalShortCircuitPaths) {
@@ -1175,7 +1272,7 @@ TEST(Xr17v358, BranchCoverageExercisesAdditionalShortCircuitPaths) {
               rx_frame.size());
   }
   EXPECT_EQ(xr17v358_receive(0, &byte, 1U, &count), XR17V358_OK);
-  EXPECT_EQ(count, 0U);
+  EXPECT_EQ(count, 1U);
 
   xr17v358_reset();
   ASSERT_EQ(

@@ -34,6 +34,8 @@ extern const uint32_t k_port_offsets[];
 extern xr17v358_ring_buffer tx_fifo[XR17V358_PORT_COUNT];
 /** Modeled RX FIFO state for each port. */
 extern xr17v358_ring_buffer rx_fifo[XR17V358_PORT_COUNT];
+/** Encoded RX bytes waiting to be moved into the modeled RX FIFO by polling. */
+extern xr17v358_ring_buffer rx_pending[XR17V358_PORT_COUNT];
 /** Buffered TX messages waiting to be moved into the TX FIFO. */
 extern xr17v358_ring_buffer tx_queue[XR17V358_PORT_COUNT];
 /** Decoded RX payload bytes waiting to be returned to callers. */

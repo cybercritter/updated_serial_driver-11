@@ -250,10 +250,12 @@ xr17v358_error xr17v358_read_hw(volatile void *device_base, size_t port_index,
  * @brief Service the port's modeled TX and RX data paths.
  * @param port_index Zero-based UART port number.
  * @details
- * Polling flushes buffered outbound messages from the internal TX write ring
- * into the modeled TX FIFO. It does not consume RX data, but it does
- * report whether a complete RX message is already available either in the RX
- * FIFO or in the decoded read ring.
+ * Polling moves up to one FIFO's worth of encoded TX bytes out of the internal
+ * TX write ring and up to one FIFO's worth of pending RX bytes into the modeled
+ * RX FIFO. Partial frames remain buffered across poll calls until enough bytes
+ * have been transferred to complete them. Polling does not consume decoded RX
+ * data, but it does report whether a complete RX frame ending in the trailing
+ * `0x7E` delimiter is already available in the RX FIFO.
  * @return XR17V358_MESSAGE_READY when a complete RX message is available after
  * polling, XR17V358_MESSAGE_NOT_READY when more RX data is still needed, or an
  * error code on failure.
@@ -267,7 +269,8 @@ xr17v358_error xr17v358_poll_port(size_t port_index);
  * @details
  * Polling stages pending TX queue bytes into the hardware TX FIFO up to the
  * current `TXLVL` space and pulls newly available RX bytes out of the hardware
- * RX FIFO according to `RXLVL`.
+ * RX FIFO according to `RXLVL`. Readiness is reported only when a complete RX
+ * frame ending in the trailing `0x7E` delimiter is present in the RX FIFO.
  * @return XR17V358_MESSAGE_READY when a complete RX message is available after
  * polling, XR17V358_MESSAGE_NOT_READY when more RX data is still needed, or an
  * error code on failure.

@@ -27,8 +27,8 @@ extern "C" {
 void xr17v358_reset(void);
 
 /**
- * @brief Return the modeled FIFO capacity in complete messages.
- * @return Maximum number of complete encoded messages tracked per FIFO.
+ * @brief Return the modeled FIFO byte capacity used per poll step.
+ * @return Maximum number of bytes moved through the modeled FIFO per poll.
  */
 size_t xr17v358_get_fifo_capacity(void);
 
@@ -55,11 +55,15 @@ size_t xr17v358_fifo_level(size_t port_index);
 size_t xr17v358_queue_size(size_t port_index);
 
 /**
- * @brief Inject one payload packet into the modeled RX FIFO path.
+ * @brief Queue one payload packet for staged movement into the modeled RX FIFO.
  * @param port_index Zero-based UART port number.
  * @param data Payload bytes to encode and inject as one message.
  * @param length Number of bytes available in @p data.
  * @param bytes_received Output count of accepted payload bytes.
+ * @details
+ * Accepted bytes are encoded immediately, then held in a pending RX staging
+ * buffer until a later `xr17v358_poll_port()` moves up to one FIFO's worth of
+ * bytes into the modeled RX FIFO.
  * @return XR17V358_OK on success or an error code on failure.
  */
 xr17v358_error xr17v358_receive(size_t port_index, const uint8_t *data,
@@ -126,8 +130,10 @@ xr17v358_error xr17v358_inject_queue_frame_bytes(size_t port_index,
  * @details
  * Despite the name, this helper decodes complete messages directly from the
  * modeled outbound TX FIFO so tests can inspect what polling staged for
- * transmission. The caller-provided buffer must be large enough for each
- * complete decoded packet read in one pass.
+ * transmission. If only a partial frame has been staged so far, this helper
+ * preserves that state and returns zero bytes until a later poll completes the
+ * frame. The caller-provided buffer must be large enough for each complete
+ * decoded packet read in one pass.
  * @return XR17V358_OK on success or an error code on failure.
  */
 xr17v358_error xr17v358_queue_read(size_t port_index, uint8_t *data,
