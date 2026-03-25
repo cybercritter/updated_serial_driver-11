@@ -1,8 +1,8 @@
 # fifoupdates
 
 `fifoupdates` is a small C/C++ project that models an XR17V358 multi-port UART
-driver, a helper layer for demo and test workflows, and a set of shared
-internal ring-buffer primitives used by the driver model.
+driver, a helper layer for test workflows, and a set of shared internal
+ring-buffer primitives used by the driver model.
 
 ## Components
 
@@ -46,18 +46,17 @@ The CMake target for this API is `xr17v358`.
 
 ### Helper API
 
-Non-production behavior lives in [`include/helpers.h`](include/helpers.h)
-and is implemented by [`src/xr17v358_helpers.c`](src/xr17v358_helpers.c) plus
-[`src/demo.c`](src/demo.c).
+Non-production behavior lives in
+[`include/hw_test_helpers.h`](include/hw_test_helpers.h) and is implemented by
+[`src/hw_test_helpers.c`](src/hw_test_helpers.c).
 
 This layer contains:
 
 - driver state reset
 - RX/TX injection helpers used by tests
 - outbound TX FIFO inspection helpers
-- demo entry points and UART base printing
 
-The CMake target for this API is `xr17v358_helpers`.
+The CMake target for this API is `hw_test_helpers`.
 
 ### Ring-buffer module
 
@@ -86,15 +85,6 @@ cmake --build build
 ```
 
 If you do not want tests, omit `-DBUILD_TESTING=ON`.
-
-## Run
-
-The demo executable prints calculated UART base addresses:
-
-```sh
-./build/xr17v358_demo
-./build/xr17v358_demo 0x20000000
-```
 
 ## Test
 

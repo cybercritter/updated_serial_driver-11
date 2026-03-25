@@ -1,12 +1,12 @@
 /**
  * @file helpers.h
- * @brief Non-production XR17V358 helper APIs used by demos and tests.
+ * @brief Non-production XR17V358 helper APIs used by tests.
  *
  * @details
- * This header exposes reset, injection, inspection, queue-drain, and demo
- * helpers that are intentionally kept separate from the production driver API.
- * Several names retain older "queue" terminology for compatibility, even
- * though the current implementation inspects the modeled outbound TX FIFO.
+ * This header exposes reset, injection, inspection, and queue-drain helpers
+ * that are intentionally kept separate from the production driver API. Several
+ * names retain older "queue" terminology for compatibility, even though the
+ * current implementation inspects the modeled outbound TX FIFO.
  */
 #ifndef XR17V358_HELPERS_H
 #define XR17V358_HELPERS_H

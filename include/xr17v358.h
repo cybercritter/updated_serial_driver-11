@@ -8,8 +8,8 @@
  * advances buffered TX messages into the modeled TX FIFO and reports whether a
  * complete RX message is available, and `xr17v358_read()` decodes complete RX
  * messages into an internal read ring before returning payload bytes. Test
- * scaffolding, demo entry points, and FIFO inspection helpers are declared
- * separately in `helpers.h`.
+ * scaffolding and FIFO inspection helpers are declared separately in
+ * `hw_test_helpers.h`.
  */
 #ifndef XR17V358_H
 #define XR17V358_H
