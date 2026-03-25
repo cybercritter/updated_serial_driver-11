@@ -19,9 +19,11 @@ It provides:
 - UART and FIFO address calculation
 - buffered transmit and receive data movement
 - TX FIFO MMIO writes
+- RX FIFO MMIO reads
+- hardware FIFO-backed TX/RX helpers
 - port polling with RX readiness reporting
 
-Current TX/RX flow:
+Modeled TX/RX flow:
 
 - `xr17v358_write()` encodes each outbound payload packet into one frame and
   buffers it in an internal TX ring
@@ -29,6 +31,16 @@ Current TX/RX flow:
   modeled TX FIFO
 - `xr17v358_read()` decodes complete packet frames from the modeled RX FIFO into an
   internal decoded read ring before returning payload bytes
+
+Hardware FIFO flow:
+
+- `xr17v358_write_hw()` encodes payload bytes, buffers them in the TX staging
+  ring, and flushes queued bytes into the hardware FIFO according to `TXLVL`
+- `xr17v358_poll_hw_port()` continues draining queued TX bytes into the hardware
+  FIFO and stages newly reported RX bytes out of the hardware FIFO according to
+  `RXLVL`
+- `xr17v358_read_hw()` stages raw RX FIFO bytes into the decode path before
+  returning payload bytes
 
 The CMake target for this API is `xr17v358`.
 
@@ -56,14 +68,13 @@ Shared ring-buffer primitives live in
 This module is used internally by the driver and helper layer. It is not meant
 to be treated as the stable application-facing API.
 
-### Hardware abstraction draft
+### Hardware abstraction
 
 The application-facing abstraction lives in [`hw_abstraction.h`](hw_abstraction.h)
 and [`src/hw_abstraction.c`](src/hw_abstraction.c).
 
-These files currently describe a planned higher-level wrapper, but they are not
-part of the active CMake build and `src/hw_abstraction.c` still needs updates
-to match the current XR17V358 type names and helpers.
+This layer now routes its read/write/poll operations through the XR17V358
+hardware FIFO path and is built as the `hw_abstraction` target.
 
 ## Build
 

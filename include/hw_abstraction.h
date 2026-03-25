@@ -6,10 +6,6 @@
  * This interface intentionally exposes only the small application-facing API
  * needed by the project. All other device-specific helpers remain internal to
  * the underlying XR17V358 driver.
- *
- * The current top-level CMake build does not compile `src/hw_abstraction.c`,
- * and that source file still needs alignment with the latest XR17V358 driver
- * type names before it can be treated as production-ready.
  */
 #ifndef HW_ABSTRACTION_H
 #define HW_ABSTRACTION_H
@@ -93,8 +89,9 @@ abaco_hw_error abaco_hw_read(size_t port_index, uint8_t *data, size_t length,
  * @param length Number of payload bytes in @p data.
  * @param bytes_written Output count of accepted payload bytes.
  * @details
- * The current XR17V358 implementation buffers payload bytes in a software TX
- * ring. A later poll moves buffered bytes into the modeled TX FIFO.
+ * The XR17V358 hardware path encodes payload bytes, buffers them in the
+ * driver's TX staging ring, and then flushes them into the hardware TX FIFO up
+ * to the currently reported `TXLVL` space.
  * @return ABACO_HW_OK on success or an error code on failure.
  */
 abaco_hw_error abaco_hw_write(size_t port_index, const uint8_t *data,

@@ -47,6 +47,26 @@ if(ENABLE_COVERAGE)
     target_link_libraries(xr17v358 PUBLIC coverage_config)
 endif()
 
+add_library(hw_abstraction STATIC
+    src/hw_abstraction.c
+)
+
+target_include_directories(hw_abstraction
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(hw_abstraction
+    PUBLIC
+        xr17v358
+)
+
+if(ENABLE_COVERAGE)
+    target_link_libraries(hw_abstraction PUBLIC coverage_config)
+endif()
+
 add_library(hw_test_helpers STATIC
     src/hw_test_helpers.c
 )

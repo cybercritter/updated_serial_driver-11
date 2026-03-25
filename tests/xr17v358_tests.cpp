@@ -25,6 +25,11 @@ std::vector<uint8_t> make_raw_frame(size_t payload_length,
   return frame;
 }
 
+size_t mmio_offset(size_t port_index, uint32_t register_offset) {
+  return static_cast<size_t>(xr17v358_get_port_offsets()[port_index] +
+                             register_offset);
+}
+
 }  // namespace
 
 TEST(Xr17v358, PortOffsetsAreExposedInOrder) {
@@ -544,6 +549,131 @@ TEST(Xr17v358, TxFifoWriteCapsAtHardwareFifoCapacity) {
   EXPECT_EQ(written, xr17v358_get_fifo_capacity());
 }
 
+TEST(Xr17v358, ReadsRawBytesFromRxFifoRegisterWindow) {
+  xr17v358_reset();
+
+  std::array<uint8_t, 0x2000> mmio{};
+  constexpr std::array<uint8_t, 6> kFrameBytes = {
+      0x7EU,
+      0x10U,
+      0x21U,
+      0x32U,
+      0x43U,
+      0x7EU,
+  };
+  std::array<uint8_t, 8> output{};
+  size_t count = 0U;
+
+  const size_t fifo_offset = mmio_offset(2, XR17V358_REG_FIFO);
+  const size_t rxlvl_offset = mmio_offset(2, XR17V358_REG_RXLVL);
+
+  mmio[rxlvl_offset] = static_cast<uint8_t>(kFrameBytes.size());
+  for (size_t i = 0; i < kFrameBytes.size(); ++i) {
+    mmio[fifo_offset + i] = kFrameBytes[i];
+  }
+
+  ASSERT_EQ(xr17v358_read_rx_fifo(mmio.data(), 2, output.data(), output.size(),
+                                  &count),
+            XR17V358_OK);
+  EXPECT_EQ(count, kFrameBytes.size());
+
+  for (size_t i = 0; i < kFrameBytes.size(); ++i) {
+    EXPECT_EQ(output[i], kFrameBytes[i]);
+  }
+}
+
+TEST(Xr17v358, HardwareWriteFlushesQueuedBytesIntoTxFifoWindow) {
+  xr17v358_reset();
+
+  std::array<uint8_t, 0x2000> mmio{};
+  constexpr std::array<uint8_t, 3> kPayload = {0x11U, 0x22U, 0x33U};
+  size_t written = 0U;
+
+  const size_t txlvl_offset = mmio_offset(1, XR17V358_REG_TXLVL);
+  const size_t fifo_offset = mmio_offset(1, XR17V358_REG_FIFO);
+  mmio[txlvl_offset] = 4U;
+
+  ASSERT_EQ(xr17v358_write_hw(mmio.data(), 1, kPayload.data(), kPayload.size(),
+                              &written),
+            XR17V358_OK);
+  EXPECT_EQ(written, kPayload.size());
+  EXPECT_EQ(tx_queue[1].size, 1U);
+  EXPECT_EQ(mmio[fifo_offset + 0U], XR17V358_FRAME_DELIMITER);
+  EXPECT_EQ(mmio[fifo_offset + 1U], kPayload[0]);
+  EXPECT_EQ(mmio[fifo_offset + 2U], kPayload[1]);
+  EXPECT_EQ(mmio[fifo_offset + 3U], kPayload[2]);
+}
+
+TEST(Xr17v358, HardwarePollContinuesFlushingQueuedTxBytes) {
+  xr17v358_reset();
+
+  std::array<uint8_t, 0x2000> mmio{};
+  constexpr std::array<uint8_t, 3> kPayload = {0x11U, 0x22U, 0x33U};
+  size_t written = 0U;
+  const size_t txlvl_offset = mmio_offset(0, XR17V358_REG_TXLVL);
+
+  mmio[txlvl_offset] = 2U;
+  ASSERT_EQ(xr17v358_write_hw(mmio.data(), 0, kPayload.data(), kPayload.size(),
+                              &written),
+            XR17V358_OK);
+  ASSERT_EQ(written, kPayload.size());
+  ASSERT_EQ(tx_queue[0].size, 3U);
+
+  mmio[txlvl_offset] = 1U;
+  EXPECT_EQ(xr17v358_poll_hw_port(mmio.data(), 0), XR17V358_MESSAGE_NOT_READY);
+  EXPECT_EQ(tx_queue[0].size, 2U);
+}
+
+TEST(Xr17v358, HardwareReadDecodesBytesPulledFromRxFifoWindow) {
+  xr17v358_reset();
+
+  std::array<uint8_t, 0x2000> mmio{};
+  constexpr std::array<uint8_t, 2> kPayload = {0x44U, 0x55U};
+  constexpr std::array<uint8_t, 4> kFrame = {
+      XR17V358_FRAME_DELIMITER,
+      kPayload[0],
+      kPayload[1],
+      XR17V358_FRAME_DELIMITER,
+  };
+  std::array<uint8_t, 2> output{};
+  size_t count = 0U;
+
+  const size_t fifo_offset = mmio_offset(3, XR17V358_REG_FIFO);
+  const size_t rxlvl_offset = mmio_offset(3, XR17V358_REG_RXLVL);
+  mmio[rxlvl_offset] = static_cast<uint8_t>(kFrame.size());
+  for (size_t i = 0; i < kFrame.size(); ++i) {
+    mmio[fifo_offset + i] = kFrame[i];
+  }
+
+  ASSERT_EQ(
+      xr17v358_read_hw(mmio.data(), 3, output.data(), output.size(), &count),
+      XR17V358_OK);
+  EXPECT_EQ(count, kPayload.size());
+  EXPECT_EQ(output, kPayload);
+  EXPECT_EQ(rx_fifo[3].size, 0U);
+}
+
+TEST(Xr17v358, HardwarePollReportsPartialRxFrameAsNotReady) {
+  xr17v358_reset();
+
+  std::array<uint8_t, 0x2000> mmio{};
+  constexpr std::array<uint8_t, 2> kPartialFrame = {
+      XR17V358_FRAME_DELIMITER,
+      0x41U,
+  };
+
+  const size_t fifo_offset = mmio_offset(4, XR17V358_REG_FIFO);
+  const size_t rxlvl_offset = mmio_offset(4, XR17V358_REG_RXLVL);
+  mmio[rxlvl_offset] = static_cast<uint8_t>(kPartialFrame.size());
+  for (size_t i = 0; i < kPartialFrame.size(); ++i) {
+    mmio[fifo_offset + i] = kPartialFrame[i];
+  }
+
+  EXPECT_EQ(xr17v358_poll_hw_port(mmio.data(), 4), XR17V358_MESSAGE_NOT_READY);
+  EXPECT_EQ(rx_fifo[4].size, kPartialFrame.size());
+  EXPECT_EQ(xr17v358_ring_frame_count(&rx_fifo[4]), 0U);
+}
+
 TEST(Xr17v358, PollerAndApisRejectInvalidArguments) {
   xr17v358_reset();
 
@@ -561,6 +691,14 @@ TEST(Xr17v358, PollerAndApisRejectInvalidArguments) {
   EXPECT_EQ(xr17v358_get_tx_fifo_base(xr17v358_get_port_count(), nullptr),
             XR17V358_ERROR_INVALID_ARGUMENT);
   EXPECT_EQ(xr17v358_write_tx_fifo(nullptr, 0, &byte, 1, &count),
+            XR17V358_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(xr17v358_read_rx_fifo(nullptr, 0, &byte, 1, &count),
+            XR17V358_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(xr17v358_write_hw(nullptr, 0, &byte, 1, &count),
+            XR17V358_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(xr17v358_read_hw(nullptr, 0, &byte, 1, &count),
+            XR17V358_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(xr17v358_poll_hw_port(nullptr, 0),
             XR17V358_ERROR_INVALID_ARGUMENT);
   EXPECT_EQ(xr17v358_poll_port(xr17v358_get_port_count()),
             XR17V358_ERROR_INVALID_PORT);
